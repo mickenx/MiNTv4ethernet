@@ -34,14 +34,13 @@ typedef u_int32_t               uint32_t;
 /*
  * Our interface structure
  */
-static struct netif if_v4net;
-static int mem;
+static struct netif if_v4net; 
+
 static volatile uint32_t alignmem;
 static volatile uint32_t swposcopy;
 static void * mem4;
-static char mem3 [2048+MEMSIZE];
-static unsigned char stmac1[4];
-static unsigned char stmac2[4];
+
+
 typedef struct _v4_ethernet_t
 {
 #if 1
@@ -81,9 +80,9 @@ uint8_t* hwd_mac = (uint8_t*)0xde0020;
 static long
 v4net_open (struct netif *nif)
 {
-volatile ulong * intena2ptr =(ulong *)0xdff29a;
-int * memptr = (int*)alignmem;
-volatile short * intenar2ptr = (short *)0xdff21c;
+
+
+
 volatile uint32_t *mac1ptr=(uint32_t*)0xde0020;
 //*intena2ptr=(short)*intenar2ptr;
 *mac1ptr = (1L<<31 |0x80<<8|0x06);
@@ -97,24 +96,18 @@ __asm__ __volatile__
 	"move.w #0xa000,0xdff29a\n\t"
 );
 #endif
-//*intena2ptr=(1UL<<31)|(1UL<<29);
-	//*mac1ptr=0x80000680;
-	//memset (memptr,0,MEMSIZE);
+
 	return 0;
 }
 
 static void
 v4net_install_int (void)
 {
-//	uint32	old_sp;
 
-//	old_sp = Super(0L);
 
 	old_i6_int = Setexc (0x6c>>2, (long) interrupt_i6);
 
-//	Super(old_sp);
 
-	//c_conws("Installed ISR\r\n");
 }
 
 void _cdecl v4net_recv(void)
@@ -123,10 +116,8 @@ int i = 0;
 short type;
 volatile uint32_t * hw_write = (ulong*) 0xde003c;
 volatile uint32_t * sw_write = (ulong*) 0xde0038;
-volatile uint16_t * int_enable = (uint16_t*) 0xdff29a;
-volatile uint16_t  * int_renable = (uint16_t*) 0xdff21c;
-volatile unsigned short * int_rreq = (unsigned short*) 0xDFF21E;
-volatile unsigned short * int_wreq = (unsigned short*) 0xDFF29C;
+
+
 uint32_t frametype;
 uint32_t lenlong=0;
 static	char message [100];
@@ -135,11 +126,11 @@ uint32_t tmp=0;
 uint32_t tmp2=0;
 uint32_t tmp3=0;
 uint32_t	*dest;
-ulong *alptr = (ulong*)alignmem;
+
 struct netif * nif=&if_v4net;
 BUF * b; 
-uint8_t * bytecopy;
-//*int_wreq=(1UL<<29);
+
+
 if (*hw_write > 0xfff00000)
 {
 	//c_conws("offline \n\r");
@@ -167,14 +158,7 @@ if (tmp2>=(uint32_t)(alignmem+MEMSIZE)) {
 	}
 	swposcopy=tmp2;
 
-//	nif->in_errors++;
-//c_conws("no buf recv\n\r");
-//if (!mem4)
-//	return;
-//c_conws("no mem recv\n\r");
-//	nif->in_errors++;
-//*(char*)swposcopy+=2048;
-bytecopy = (uint8_t*)tmp2; //swposcopy;
+
 frame_len =(short) *((short*)tmp2+3) ;//(uint16_t)bytecopy[6];(char*)(swposcopy+6));
 ksprintf (message, "swposcopy: 0x%lx\n\r", tmp2);
 //c_conws(message);
@@ -182,9 +166,7 @@ ksprintf (message, "len: %d\n\r", frame_len);
 //c_conws(message);
 *((short*)tmp2+3)=(short)0;
 frame_len = frame_len & 2047;
-//bytecopy[6]=0;
-//*((char*)(swposcopy+6))=(unsigned short)0;
-//*(unsigned short*)tmp2=frame_len;
+
 if (frame_len < 14 || frame_len > 1535)
 {
 	nif->in_errors++;
@@ -207,8 +189,7 @@ __asm__ __volatile__
 );
 	return;
 }
-//	nif->in_errors++;
-//b->dend += frame_len;
+
 b->dstart = (char*)(((uint32_t)(b->dstart)) & 0xFFFFFFFCUL);
 b->dend = (char*)(((uint32_t)(b->dend)) & 0xFFFFFFFCUL);
 dest = (uint32_t*)(b->dstart);
@@ -239,13 +220,11 @@ frametype = *( (short*)(tmp3+12) );
 			}
 #endif			
 tmp3=tmp2+8;
-//memcpy((uint32_t*)dest,(uint32_t*)tmp3,lenlong*sizeof(uint32_t));
+
 #if 1
 for(i=0;i<lenlong;i++){
 
-	//*((char*)dest+i)=*((char*)tmp2+i+(8));
-	//*(dest++)=*((uint32_t*)tmp2+i+2);
-		//i++;
+	
 	*(dest+i)=*((uint32_t*)tmp2+i+2);
   
 }
@@ -285,10 +264,6 @@ if (nif->bpf)
 	//				c_conws("input packet failed when receiving!\n\r");
 				}
 
-//nif->in_errors++;
-//c_conws("end recv\n\r");
-//*int_wreq|=(1UL<<29);
-//*int_enable|=(1UL<<13);
 
 if (tmp!=alignmem)
 *sw_write=tmp; 
@@ -302,9 +277,9 @@ if (tmp!=alignmem)
 static long
 v4net_close (struct netif *nif)
 {
-	volatile uint32_t *mac1ptr=(uint32_t*)0xde0020; 
+	
 	v4e->dma=0;
-	// *mac1ptr=0x00000680;
+	
 	return 0;
 }
 
@@ -430,15 +405,15 @@ v4net_output (struct netif *nif, BUF *buf, const char *hwaddr, short hwlen, shor
 	long r;
 	int tlen,rounded_len,stufflen;
 static	char message [100];
-	volatile        uint32_t *datapnt;
+	
 
-        volatile        ulong *eth_dst_pnt; 
+        
  	ulong txfifo = 0xde0040;
  	ulong txq = 0xde0044;
 	ulong *txptr = (ulong*)txfifo;
 	ulong *txqtr = (ulong*)txq;
 	uint32_t i =0;
-	uint32_t zerostuff=0;
+	
 	//static	char message [100];
 	 //c_conws ("send start \n");
 	 ksprintf (message, "hw send : %lx\n\r", *hwaddr);
@@ -498,25 +473,11 @@ static	char message [100];
 	 *
 	 * Before sending it pass it to the packet filter.
 	 */
-datapnt=(uint32_t*)nbuf->dstart;
 
-        eth_dst_pnt=(ulong*)txfifo; 
 
         tlen = (nbuf->dend) - (nbuf->dstart);
 
-#if 0
-		for (i=0;i<10000000;i++)
-		{
-			if (*txqtr >= tlen)
-				goto txcont;
-				
-			
-		}
-		c_conws ("no spacie in q\n\r");
-		buf_deref (nbuf, BUF_NORMAL);
-		return ENOMEM;
-#endif
-txcont:
+
 	ksprintf (message, "tx q : %lx\n\r", *txqtr);
 	// c_conws(message);
         rounded_len = ((tlen + 3UL) & 0xFFFC);
@@ -736,11 +697,11 @@ long
 driver_init (void)
 {
 	unsigned char hwtmp[6];
-	uint8_t hwbtmp[6];
+	
 	static char message[100];
 	static char my_file_name[128];
-volatile uint32_t *dmaendptr = (uint32_t*)0xde0034;
-volatile uint32_t *dmastartptr = (uint32_t*)0xde0030;
+
+
 volatile uint32_t *mac1ptr = (uint32_t*)0xde0020;
 
 volatile uint32_t* mac2ptr =(uint32_t*) 0xde0024;
@@ -751,18 +712,14 @@ volatile ulong * multi2ptr = (ulong*)0xde002c;
 
 volatile ulong * swposptr = (ulong *)0xde0038;
 
-volatile ulong * hwregptr = (ulong *)0xde003c;
 
-volatile ulong * txwordptr =(ulong *)0xde0040;
 
-volatile ulong * intena2ptr =(ulong *)0xdff29a;
 
-volatile ulong * intenar2ptr = (ulong *)0xdff21c;
 
-volatile ulong * intereqr2ptr = (ulong *)0xdff21e;
 
-volatile ulong * intreq2ptr =(ulong *)0xdff29c; 
-	void *mem2;	
+
+
+	
 	/*
 	 * Set interface name
 	 */
@@ -811,12 +768,7 @@ volatile ulong * intreq2ptr =(ulong *)0xdff29c;
 	hwtmp[3]=0x04;
 	hwtmp[4]=0x04;
 	hwtmp[5]=0x04;
-	hwbtmp[0]=0xff;
-	hwbtmp[1]=0xff;
-	hwbtmp[2]=0xff;
-	hwbtmp[3]=0xff;
-	hwbtmp[4]=0xff;
-	hwbtmp[5]=0xff;
+	
 	memcpy (if_v4net.hwlocal.adr.bytes, hwtmp, ETH_ALEN);
 	//memcpy (if_v4net.hwbrcst.adr.bytes, hwbtmp, ETH_ALEN);
 	memcpy (if_v4net.hwbrcst.adr.bytes, "\377\377\377\377\377\377", ETH_ALEN);
@@ -867,46 +819,20 @@ alignmem=(uint32_t)mem4;
 if (!alignmem)
 	return(0);
 memset((void*)alignmem,0,MEMSIZE);
-/*if(!(alignmem+MEMSIZE)%2048)
-{
-	c_conws("not aliged ");
-	return(0);
-}*/
+
 c_conws ("4");
-#if 0
-__asm__ __volatile__
-(
 
-
-	"movem.l a0-a6/d0-d7,-(sp)\n\t"
-        "move.l #0,0xde0028\n\t"
-
-        "move.l #0,0xde002c\n\t"
-	"lea .mactest,a1\n\t"
-	"move.w (a1),d0\n\t"
-	"move.l d0,0xde0020\n\t"
-	"move.l 2(a1),0xde0024\n\t"
-	"bra	.ert0\n\t"
-".mactest db	0x06,0x80,0x11,0x04,0x04,0x04\n\t"
-".ert0\n\t"
-	" movem.l (sp)+,a0-a6/d0-d7\n\t"
-); 
-	#endif
+	
  *multi1ptr=-1;
 
  *multi2ptr=-1;
 
-//*mac1ptr=0;
 
-	//*dmastartptr=(uint32_t)alignmem ; /*mem;*/
-
-//*mac2ptr=0x11040404;
-//*mac1ptr=0x0680;
 	v4e->rx_start=alignmem;
 	v4e->rx_stop=alignmem+MEMSIZE;
 
 
-	//*dmaendptr=(uint32_t)MEMSIZE+alignmem; 
+	 
 c_conws ("5 ");
 *swposptr=((alignmem+MEMSIZE)-2048);
 swposcopy=((alignmem+MEMSIZE)-2048);
@@ -918,29 +844,11 @@ swposcopy=((alignmem+MEMSIZE)-2048);
 (char*)mac2ptr[2]=0x80;
 (char*)mac2ptr[4]=0x06;
 #endif
-//	memcpy((char*)mac2ptr,stmac2,4);
-//	memcpy((char*)mac1ptr,stmac1,4);
-/*
-	06:80:11:04:04:04
 
-*/
 
 	*mac1ptr = (0x80L<<8|0x06);
 	*mac2ptr = (0x4L<<24|0x4L<<16|0x4L<<8|0x11);
-//uint8_t* hwd_mac = (uint8_t*)mac1ptr;
-#if 0
-v4e->dma=0;
 
-//hwd_mac[0] = hwd_mac[1] = 0;
-v4e->mac[0] = hwtmp[5];
-v4e->mac[1] = hwtmp[4];
-v4e->mac[2] = hwtmp[3];
-v4e->mac[3] = hwtmp[2];
-v4e->mac[4] = hwtmp[1];
-v4e->mac[5] = hwtmp[0];
-#endif
-//v4e->multicast1=0;
-//v4e->multicast2=0;
 
 c_conws (" done ");
 v4net_install_int();
