@@ -1,0 +1,982 @@
+/*     
+ *	v4net , ethernet driver for Vampire V4
+ *  Based on FreeMiNT dummy ethernet driver
+ *	12/14/94, Kay Roemer. 11/09/2021 Michael Grunditz
+ */
+#include <malloc.h>
+# include "global.h"
+    
+# include "buf.h"
+# include "inet4/if.h"
+# include "inet4/ifeth.h"
+# include "netinfo.h"
+#include "debug.h"
+#include "svethlana/svethlana_i6.h"
+# include "mint/sockio.h"
+# include <mint/osbind.h>
+# include <mint/ssystem.h>
+# include "arch/tosbind.h"
+typedef u_int32_t               uint32_t;
+
+        typedef u_int32_t               uint32;
+
+        typedef u_int16_t               uint16_t;
+
+        typedef u_int16_t               uint16;
+
+        typedef int32_t                 int32;
+
+        typedef int16_t                 int16;
+	typedef u_int8_t                 uint8_t;
+
+
+#define MEMSIZE 204800
+/*
+ * Our interface structure
+ */
+static struct netif if_v4net;
+static int mem;
+static volatile uint32_t alignmem;
+static volatile uint32_t swposcopy;
+static void * mem4;
+static char mem3 [2048+MEMSIZE];
+static unsigned char stmac1[4];
+static unsigned char stmac2[4];
+typedef struct _v4_ethernet_t
+{
+#if 1
+  uint16_t dma;
+  uint8_t  mac[6];
+ #else
+  uint32_t mac1;         /* DMA_ON<<31 | MAC(0:15)                   */
+  uint32_t mac2;         /* MAC(16:47)                               */
+#endif
+  uint32_t multicast1;   /* high order bits multicast hash           */
+  uint32_t multicast2;   /* low  order bits multicast hash           */
+  uint32_t rx_start;     /* DMA buffer start (aligned to 2048 bytes) */
+  uint32_t rx_stop;      /* DMA buffer end (aligned to 2048 bytes)   */
+  uint32_t rx_swpos;     /* RX software position (barrier)           */
+  uint32_t rx_hwpos;     /* hardware RX write position               */
+  uint32_t txword;       /* write port for TX FIFO (32 Bits)         */
+  uint32_t txqueuelen;   /* number of words in TX FIFO               */
+} v4_ethernet_t;
+
+volatile v4_ethernet_t * v4e = (v4_ethernet_t*)0xde0020;
+/*
+ * Prototypes for our service functions
+ */
+static long	v4net_open	(struct netif *);
+static long	v4net_close	(struct netif *);
+static long	v4net_output	(struct netif *, BUF *, const char *, short, short);
+static long	v4net_ioctl	(struct netif *, short, long);
+static long	v4net_config	(struct netif *, struct ifopt *);
+void _cdecl v4net_recv(void);
+static void v4net_install_int (void);
+uint8_t* hwd_mac = (uint8_t*)0xde0020;
+/*
+ * This gets called when someone makes an 'ifconfig up' on this interface
+ * and the interface was down before.
+   V4net : online in init will change
+ */
+static long
+v4net_open (struct netif *nif)
+{
+volatile ulong * intena2ptr =(ulong *)0xdff29a;
+int * memptr = (int*)alignmem;
+volatile short * intenar2ptr = (short *)0xdff21c;
+volatile uint32_t *mac1ptr=(uint32_t*)0xde0020;
+//*intena2ptr=(short)*intenar2ptr;
+*mac1ptr = (1L<<31 |0x80<<8|0x06);
+//v4e->dma=(1L<<15);
+static	char message [100];
+ksprintf (message, "addr: 0x%lx\n\r", alignmem);
+c_conws(message);
+#if 0
+__asm__ __volatile__
+(
+	"move.w #0xa000,0xdff29a\n\t"
+);
+#endif
+//*intena2ptr=(1UL<<31)|(1UL<<29);
+	//*mac1ptr=0x80000680;
+	//memset (memptr,0,MEMSIZE);
+	return 0;
+}
+
+static void
+v4net_install_int (void)
+{
+//	uint32	old_sp;
+
+//	old_sp = Super(0L);
+
+	old_i6_int = Setexc (0x6c>>2, (long) interrupt_i6);
+
+//	Super(old_sp);
+
+	//c_conws("Installed ISR\r\n");
+}
+
+void _cdecl v4net_recv(void)
+{
+int i = 0;
+short type;
+volatile uint32_t * hw_write = (ulong*) 0xde003c;
+volatile uint32_t * sw_write = (ulong*) 0xde0038;
+volatile uint16_t * int_enable = (uint16_t*) 0xdff29a;
+volatile uint16_t  * int_renable = (uint16_t*) 0xdff21c;
+volatile unsigned short * int_rreq = (unsigned short*) 0xDFF21E;
+volatile unsigned short * int_wreq = (unsigned short*) 0xDFF29C;
+uint32_t frametype;
+uint32_t lenlong=0;
+static	char message [100];
+short frame_len = 0;
+uint32_t tmp=0;
+uint32_t tmp2=0;
+uint32_t tmp3=0;
+uint32_t	*dest;
+ulong *alptr = (ulong*)alignmem;
+struct netif * nif=&if_v4net;
+BUF * b; 
+uint8_t * bytecopy;
+//*int_wreq=(1UL<<29);
+if (*hw_write > 0xfff00000)
+{
+	//c_conws("offline \n\r");
+	return;
+}
+rxrestart:
+if ((uint32_t)*(hw_write)==(uint32_t)swposcopy)
+{
+//c_conws("no buf recv\n\r");
+
+
+	return;
+}
+
+
+tmp=swposcopy;
+tmp2=(uint32_t)2048+(swposcopy); //(swposcopy+2048);
+ksprintf (message, "swposcopy:1 0x%lx\n\r", *(uint32_t*)swposcopy);
+//c_conws(message);
+if (tmp2>=(uint32_t)(alignmem+MEMSIZE)) {
+	ksprintf (message, "swposcopy wrap : 0x%x\n\r", swposcopy);
+//c_conws(message);
+	
+	tmp2=alignmem;
+	}
+	swposcopy=tmp2;
+
+//	nif->in_errors++;
+//c_conws("no buf recv\n\r");
+//if (!mem4)
+//	return;
+//c_conws("no mem recv\n\r");
+//	nif->in_errors++;
+//*(char*)swposcopy+=2048;
+bytecopy = (uint8_t*)tmp2; //swposcopy;
+frame_len =(short) *((short*)tmp2+3) ;//(uint16_t)bytecopy[6];(char*)(swposcopy+6));
+ksprintf (message, "swposcopy: 0x%lx\n\r", tmp2);
+//c_conws(message);
+ksprintf (message, "len: %d\n\r", frame_len);
+//c_conws(message);
+*((short*)tmp2+3)=(short)0;
+frame_len = frame_len & 2047;
+//bytecopy[6]=0;
+//*((char*)(swposcopy+6))=(unsigned short)0;
+//*(unsigned short*)tmp2=frame_len;
+if (frame_len < 14 || frame_len > 1535)
+{
+	nif->in_errors++;
+	c_conws("SIZE ERROR\r\n");
+   goto rxrestart;
+//*int_enable|=(1UL<<13)|(1UL<<29);
+	
+	return;
+	
+}
+b = buf_alloc (frame_len +200, 100, BUF_ATOMIC);
+//c_conws("start recv\n\r");
+if (!b)
+{
+c_conws("BUF ERROR\r\n");
+	nif->in_errors++;
+__asm__ __volatile__
+(
+	"move.l #0xa000,0xdff29a\n\t"
+);
+	return;
+}
+//	nif->in_errors++;
+//b->dend += frame_len;
+b->dstart = (char*)(((uint32_t)(b->dstart)) & 0xFFFFFFFCUL);
+b->dend = (char*)(((uint32_t)(b->dend)) & 0xFFFFFFFCUL);
+dest = (uint32_t*)(b->dstart);
+//*(char*)swposcopy+=8;
+
+lenlong= (frame_len+ 3UL) >> 2;
+//for (i=0;i<(frame_len);i++)
+frametype = *( (short*)(tmp3+12) );
+
+#if 1
+			//Frames of a zero size or type are not useful.
+			//these also crash AROS.
+			if( frametype == 0 )
+			{
+				c_conws("zero type \r\n");
+				//KPrintF( "Skipping Frametype %04x (zero size/type).\n", frametype );
+				return;
+			}
+
+			//Skip VLAN frames.
+			//TODO: Is this really needed?
+			if( frametype == 0x8100 )
+			{
+				c_conws("vlan type\r\n");
+				//KPrintF( "Skipping Frametype %04x (VLAN Tagged).\n", frametype );
+				return;
+
+			}
+#endif			
+tmp3=tmp2+8;
+//memcpy((uint32_t*)dest,(uint32_t*)tmp3,lenlong*sizeof(uint32_t));
+#if 1
+for(i=0;i<lenlong;i++){
+
+	//*((char*)dest+i)=*((char*)tmp2+i+(8));
+	//*(dest++)=*((uint32_t*)tmp2+i+2);
+		//i++;
+	*(dest+i)=*((uint32_t*)tmp2+i+2);
+  
+}
+#endif
+//c_conws("after copy\r\n");
+b->dend += frame_len -4;
+                        //TODO: should we subtract 4 here, to skip the CRC?
+
+                                //(uint32)(frame_len - 4UL); 
+				
+                //TODO: should we subtract 4 here, to skip the CRC?
+
+                                if((b->dend) < (b->dstart))
+
+                                {
+
+                                        c_conws("RX: dend < dstart!\r\n");
+
+                                }
+
+
+//c_conws("1 recv\n\r");
+
+
+if (nif->bpf)
+    bpf_input (nif, b);
+
+//c_conws("3 recv\n\r");
+				type = eth_remove_hdr(b);
+
+				// and enqueue packet
+				if(!if_input(nif, b, 0UL, type))
+					nif->in_packets++;
+				else
+				{
+					nif->in_errors++;
+	//				c_conws("input packet failed when receiving!\n\r");
+				}
+
+//nif->in_errors++;
+//c_conws("end recv\n\r");
+//*int_wreq|=(1UL<<29);
+//*int_enable|=(1UL<<13);
+
+if (tmp!=alignmem)
+*sw_write=tmp; 
+
+
+}
+/*
+ * Opposite of v4net_open(), is called when 'ifconfig down' on this interface
+	 * is done and the interface was up before.
+ */
+static long
+v4net_close (struct netif *nif)
+{
+	volatile uint32_t *mac1ptr=(uint32_t*)0xde0020; 
+	v4e->dma=0;
+	// *mac1ptr=0x00000680;
+	return 0;
+}
+
+/*
+ * This routine is responsible for enqueing a packet for later sending.
+ * The packet it passed in `buf', the destination hardware address and
+ * length in `hwaddr' and `hwlen' and the type of the packet is passed
+ * in `pktype'.
+ *
+ * `hwaddr' is guaranteed to be of type nif->hwtype and `hwlen' is
+ * garuanteed to be equal to nif->hwlocal.len.
+ *
+ * `pktype' is currently one of (definitions in if.h):
+ *	PKTYPE_IP for IP packets,
+ *	PKTYPE_ARP for ARP packets,
+ *	PKTYPE_RARP for reverse ARP packets.
+ *
+ * These constants are equal to the ethernet protocol types, ie. an
+ * Ethernet driver may use them directly without prior conversion to
+ * write them into the `proto' field of the ethernet header.
+ *
+ * If the hardware is currently busy, then you can use the interface
+ * output queue (nif->snd) to store the packet for later transmission:
+ *	if_enqueue (&nif->snd, buf, buf->info).
+ *
+ * `buf->info' specifies the packet's delivering priority. if_enqueue()
+ * uses it to do some priority queuing on the packets, ie. if you enqueue
+ * a high priority packet it may jump over some lower priority packets
+ * that were already in the queue (ie that is *no* FIFO queue).
+ *
+ * You can dequeue a packet later by doing:
+ *	buf = if_dequeue (&nif->snd);
+ *
+ * This will return NULL is no more packets are left in the queue.
+ *
+ * The buffer handling uses the structure BUF that is defined in buf.h.
+ * Basically a BUF looks like this:
+ *
+ * typedef struct {
+ *	long buflen;
+ *	char *dstart;
+ *	char *dend;
+ *	...
+ *	char data[0];
+ * } BUF;
+ *
+ * The structure consists of BUF.buflen bytes. Up until BUF.data there are
+ * some header fields as shown above. Beginning at BUF.data there are
+ * BUF.buflen - sizeof (BUF) bytes (called userspace) used for storing the
+ * packet.
+ *
+ * BUF.dstart must always point to the first byte of the packet contained
+ * within the BUF, BUF.dend points to the first byte after the packet.
+ *
+ * BUF.dstart should be word aligned if you pass the BUF to any MintNet
+ * functions! (except for the buf_* functions itself).
+ *
+ * BUF's are allocated by
+ *	nbuf = buf_alloc (space, reserve, mode);
+ *
+ * where `space' is the size of the userspace of the BUF you need, `reserve'
+ * is used to set BUF.dstart = BUF.dend = BUF.data + `reserve' and mode is
+ * one of
+ *	BUF_NORMAL for calls from kernel space,
+ *	BUF_ATOMIC for calls from interrupt handlers.
+ *
+ * buf_alloc() returns NULL on failure.
+ *
+ * Usually you need to pre- or postpend some headers to the packet contained
+ * in the passed BUF. To make sure there is enough space in the BUF for this
+ * use
+ *	nbuf = buf_reserve (obuf, reserve, where);
+ *
+ * where `obuf' is the BUF where you want to reserve some space, `reserve'
+ * is the amount of space to reserve and `where' is one of
+ *	BUF_RESERVE_START for reserving space before BUF.dstart
+ *	BUF_RESERVE_END for reserving space after BUF.dend
+ *
+ * Note that buf_reserve() returns pointer to a new buffer `nbuf' (possibly
+ * != obuf) that is a clone of `obuf' with enough space allocated. `obuf'
+ * is no longer existant afterwards.
+ *
+ * However, if buf_reserve() returns NULL for failure then `obuf' is
+ * untouched.
+ *
+ * buf_reserve() does not modify the BUF.dstart or BUF.dend pointers, it
+ * only makes sure you have the space to do so.
+ *
+ * In the worst case (if the BUF is to small), buf_reserve() allocates a new
+ * BUF and copies the old one to the new one (this is when `nbuf' != `obuf').
+ *
+ * To avoid this you should reserve enough space when calling buf_alloc(), so
+ * buf_reserve() does not need to copy. This is what MintNet does with the BUFs
+ * passed to the output function, so that copying is never needed. You should
+ * do the same for input BUFs, ie allocate the packet as eg.
+ *	buf = buf_alloc (nif->mtu+sizeof (eth_hdr)+100, 50, BUF_ATOMIC);
+ *
+ * Then up to nif->mtu plus the length of the ethernet header bytes long
+ * frames may ne received and there are still 50 bytes after and before
+ * the packet.
+ *
+ * If you have sent the contents of the BUF you should free it by calling
+ *	buf_deref (`buf', `mode');
+ *
+ * where `buf' should be freed and `mode' is one of the modes described for
+ * buf_alloc().
+ *
+ * Functions that can be called from interrupt:
+ *	buf_alloc (..., ..., BUF_ATOMIC);
+ *	buf_deref (..., BUF_ATOMIC);
+ *	if_enqueue ();
+ *	if_dequeue ();
+ *	if_input ();
+ *	eth_remove_hdr ();
+ *	addroottimeout (..., ..., 1);
+ */
+ 
+static long
+v4net_output (struct netif *nif, BUF *buf, const char *hwaddr, short hwlen, short pktype)
+{
+	BUF *nbuf;
+	short type;
+	long r;
+	int tlen,rounded_len,stufflen;
+static	char message [100];
+	volatile        uint32_t *datapnt;
+
+        volatile        ulong *eth_dst_pnt; 
+ 	ulong txfifo = 0xde0040;
+ 	ulong txq = 0xde0044;
+	ulong *txptr = (ulong*)txfifo;
+	ulong *txqtr = (ulong*)txq;
+	uint32_t i =0;
+	uint32_t zerostuff=0;
+	//static	char message [100];
+	 //c_conws ("send start \n");
+	 ksprintf (message, "hw send : %lx\n\r", *hwaddr);
+	 //c_conws(message);
+	 ksprintf (message, "hw local : %lx\n\r", *nif->hwlocal.adr.bytes);
+//c_conws(message);
+	/*
+	 * This is not needed in real hardware drivers. We test
+	 * only if the destination hardware address is either our
+	 * hw or our broadcast address, because we loop the packets
+	 * back only then.
+	 */
+	if (memcmp (hwaddr, nif->hwlocal.adr.bytes, ETH_ALEN) &&
+	    memcmp (hwaddr, nif->hwbrcst.adr.bytes, ETH_ALEN))
+	{
+		//c_conws ("send out \n"); 
+		/*
+		 * Not for me.
+		 */
+/*		buf_deref (buf, BUF_NORMAL);
+		return 0;*/
+	}
+	stufflen=0;
+	/*
+	 * Attach eth header. MintNet provides you with the eth_build_hdr
+	 * function that attaches an ethernet header to the packet in
+	 * buf. It takes the BUF (buf), the interface (nif), the hardware
+	 * address (hwaddr) and the packet type (pktype).
+	 *
+	 * Returns NULL if the header could not be attached (the passed
+	 * buf is thrown away in this case).
+	 *
+	 * Otherwise a pointer to a new BUF with the packet and attached
+	 * header is returned and the old buf pointer is no longer valid.
+	 */
+	nbuf = eth_build_hdr (buf, nif, hwaddr, pktype);
+	if (nbuf == 0)
+	{
+		c_conws ("send nonbuf \n"); 
+		nif->out_errors++;
+		return ENOMEM;
+	}
+	nif->out_packets++;
+	
+	if (nif->bpf)
+           bpf_input (nif, nbuf);
+
+
+
+
+	/*
+	 * Here you should either send the packet to the hardware or
+	 * enqueue the packet and send the next packet as soon as
+	 * the hardware is finished.
+	 *
+	 * If you are done sending the packet free it with buf_deref().
+	 *
+	 * Before sending it pass it to the packet filter.
+	 */
+datapnt=(uint32_t*)nbuf->dstart;
+
+        eth_dst_pnt=(ulong*)txfifo; 
+
+        tlen = (nbuf->dend) - (nbuf->dstart);
+
+#if 0
+		for (i=0;i<10000000;i++)
+		{
+			if (*txqtr >= tlen)
+				goto txcont;
+				
+			
+		}
+		c_conws ("no spacie in q\n\r");
+		buf_deref (nbuf, BUF_NORMAL);
+		return ENOMEM;
+#endif
+txcont:
+	ksprintf (message, "tx q : %lx\n\r", *txqtr);
+	// c_conws(message);
+        rounded_len = ((tlen + 3UL) & 0xFFFC);
+        //If the packet is greater than 1536 we return error
+ksprintf (message, "tx len : %d\n\r",rounded_len);
+	 //c_conws(message);
+        if (rounded_len > 1536UL) 
+		return (1);
+	if (rounded_len<64) {
+		//c_conws("rounded len err\n\r");
+		stufflen=64-rounded_len;
+		}
+		//stufflen=0;
+	if (stufflen>0) {
+	ksprintf (message, "stuff len : %d\n\r",stufflen);
+	 //c_conws(message);
+
+	*txptr=64;
+	}
+	else
+	{
+		//c_conws("set round\n\r");
+		stufflen=0UL;
+	*txptr=rounded_len;
+	}
+	rounded_len=rounded_len>>2;
+	for(i=0;i<rounded_len;i++)
+	{
+		*((uint32_t*)txptr)=*((u_int32_t*)nbuf->dstart+i);
+	}
+	
+	if (stufflen>0)
+	{
+	//c_conws("stufflen!!\n\r");
+	stufflen=stufflen>>2;
+	for(i=0;i<stufflen;i++)
+	{
+		__asm__ __volatile__
+		(
+	"move.l #0,0xde0040\n\t"
+			);
+		//*((uint32_t*)txptr)=0;//(uint32_t)zerostuff;
+	}
+	}
+	//c_conws ("send return\n");
+	buf_deref (nbuf, BUF_NORMAL);
+	return (0);
+	/*
+	 * Now follows the input side code of the driver. This is
+	 * only part of the output function, because this example
+	 * is a loopback driver.
+	 */
+	
+	/*
+	 * Before passing it to if_input pass it to the packet filter.
+	 * (but before stripping the ethernet header).
+	 *
+	 * For the loopback driver this doesn't make sense... We
+	 * would see all packets twice!
+	 *
+	 * if (nif->bpf)
+	 *	bpf_input (nif, buf);
+	 */
+	
+	/*
+	 * Strip eth header and get packet type. MintNet provides you
+	 * with the function eth_remove_hdr(buf) for this purpose where
+	 * `buf' contains an ethernet frame. eth_remove_hdr strips the
+	 * ethernet header and returns the packet type.
+	 */
+	type = eth_remove_hdr (nbuf);
+	
+	/*
+	 * Then you should pass the buf to MintNet for further processing,
+	 * using
+	 *	if_input (nif, buf, 0, type);
+	 *
+	 * where `nif' is the interface the packet was received on, `buf'
+	 * contains the packet and `type' is the packet type, which must
+	 * be a valid ethernet protcol identifier.
+	 *
+	 * if_input takes `buf' over, so after calling if_input() on it
+	 * you can no longer access it.
+	 */
+	r = if_input (nif, nbuf, 0, type);
+	if (r)
+		nif->in_errors++;
+	else
+		nif->in_packets++;
+	
+	return r;
+}
+
+/*
+ * MintNet notifies you of some noteable IOCLT's. Usually you don't
+ * need to act on them because MintNet already has done so and only
+ * tells you that an ioctl happened.
+ *
+ * One useful thing might be SIOCGLNKFLAGS and SIOCSLNKFLAGS for setting
+ * and getting flags specific to your driver. For an example how to use
+ * them look at slip.c
+ */
+static long
+v4net_ioctl (struct netif *nif, short cmd, long arg)
+{
+	struct ifreq *ifr;
+	
+	switch (cmd)
+	{
+		case SIOCSIFNETMASK:
+		case SIOCSIFFLAGS:
+		case SIOCSIFADDR:
+			return 0;
+		
+		case SIOCSIFMTU:
+			/*
+			 * Limit MTU to 1500 bytes. MintNet has alraedy set nif->mtu
+			 * to the new value, we only limit it here.
+			 */
+			if (nif->mtu > ETH_MAX_DLEN)
+				nif->mtu = ETH_MAX_DLEN;
+			return 0;
+		
+		case SIOCSIFOPT:
+			/*
+			 * Interface configuration, handled by v4net_config()
+			 */
+			ifr = (struct ifreq *) arg;
+			return v4net_config (nif, ifr->ifru.data);
+	}
+	
+	return ENOSYS;
+}
+
+/*
+ * Interface configuration via SIOCSIFOPT. The ioctl is passed a
+ * struct ifreq *ifr. ifr->ifru.data points to a struct ifopt, which
+ * we get as the second argument here.
+ *
+ * If the user MUST configure some parameters before the interface
+ * can run make sure that v4net_open() fails unless all the necessary
+ * parameters are set.
+ *
+ * Return values	meaning
+ * ENOSYS		option not supported
+ * ENOENT		invalid option value
+ * 0			Ok
+ */
+static long
+v4net_config (struct netif *nif, struct ifopt *ifo)
+{
+# define STRNCMP(s)	(strncmp ((s), ifo->option, sizeof (ifo->option)))
+	
+	if (!STRNCMP ("hwaddr"))
+	{
+		uchar *cp;
+		/*
+		 * Set hardware address
+		 */
+		if (ifo->valtype != IFO_HWADDR)
+			return ENOENT;
+		memcpy (nif->hwlocal.adr.bytes, ifo->ifou.v_string, ETH_ALEN);
+		cp = nif->hwlocal.adr.bytes;
+		UNUSED (cp);
+		DEBUG (("v4net: hwaddr is %x:%x:%x:%x:%x:%x",
+			cp[0], cp[1], cp[2], cp[3], cp[4], cp[5]));
+	}
+	else if (!STRNCMP ("braddr"))
+	{
+		uchar *cp;
+		/*
+		 * Set broadcast address
+		 */
+		if (ifo->valtype != IFO_HWADDR)
+			return ENOENT;
+		memcpy (nif->hwbrcst.adr.bytes, ifo->ifou.v_string, ETH_ALEN);
+		cp = nif->hwbrcst.adr.bytes;
+		UNUSED (cp);
+		DEBUG (("v4net: braddr is %x:%x:%x:%x:%x:%x",
+			cp[0], cp[1], cp[2], cp[3], cp[4], cp[5]));
+	}
+	else if (!STRNCMP ("debug"))
+	{
+		/*
+		 * turn debuggin on/off
+		 */
+		if (ifo->valtype != IFO_INT)
+			return ENOENT;
+		DEBUG (("v4net: debug level is %ld", ifo->ifou.v_long));
+	}
+	else if (!STRNCMP ("log"))
+	{
+		/*
+		 * set log file
+		 */
+		if (ifo->valtype != IFO_STRING)
+			return ENOENT;
+		DEBUG (("v4net: log file is %s", ifo->ifou.v_string));
+	}
+	
+	return ENOSYS;
+}
+
+/*
+ * Initialization. This is called when the driver is loaded. If you
+ * link the driver with main.o and init.o then this must be called
+ * driver_init() because main() calles a function with this name.
+ *
+ * You should probe for your hardware here, setup the interface
+ * structure and register your interface.
+ *
+ * This function should return 0 on success and != 0 if initialization
+ * fails.
+ */
+long driver_init(void);
+long
+driver_init (void)
+{
+	unsigned char hwtmp[6];
+	uint8_t hwbtmp[6];
+	static char message[100];
+	static char my_file_name[128];
+volatile uint32_t *dmaendptr = (uint32_t*)0xde0034;
+volatile uint32_t *dmastartptr = (uint32_t*)0xde0030;
+volatile uint32_t *mac1ptr = (uint32_t*)0xde0020;
+
+volatile uint32_t* mac2ptr =(uint32_t*) 0xde0024;
+
+volatile ulong * multi1ptr = (ulong *)0xde0028;
+
+volatile ulong * multi2ptr = (ulong*)0xde002c;
+
+volatile ulong * swposptr = (ulong *)0xde0038;
+
+volatile ulong * hwregptr = (ulong *)0xde003c;
+
+volatile ulong * txwordptr =(ulong *)0xde0040;
+
+volatile ulong * intena2ptr =(ulong *)0xdff29a;
+
+volatile ulong * intenar2ptr = (ulong *)0xdff21c;
+
+volatile ulong * intereqr2ptr = (ulong *)0xdff21e;
+
+volatile ulong * intreq2ptr =(ulong *)0xdff29c; 
+	void *mem2;	
+	/*
+	 * Set interface name
+	 */
+	strcpy (if_v4net.name, "en");
+	/*
+	 * Set interface unit. if_getfreeunit("name") returns a yet
+	 * unused unit number for the interface type "name".
+	 */
+	if_v4net.unit = if_getfreeunit ("en");
+	/*
+	 * Alays set to zero
+	 */
+	if_v4net.metric = 0;
+	/*
+	 * Initial interface flags, should be IFF_BROADCAST for
+	 * Ethernet.
+	 */
+	if_v4net.flags = IFF_BROADCAST;
+	/*
+	 * Maximum transmission unit, should be >= 46 and <= 1500 for
+	 * Ethernet
+	 */
+	if_v4net.mtu = 1500;
+	/*
+	 * Time in ms between calls to (*if_v4net.timeout) ();
+	 */
+	if_v4net.timer = 0;
+	
+	/*
+	 * Interface hardware type
+	 */
+	if_v4net.hwtype = HWTYPE_ETH;
+	/*
+	 * Hardware address length, 6 bytes for Ethernet
+	 */
+	if_v4net.hwlocal.len =
+	if_v4net.hwbrcst.len = ETH_ALEN;
+	
+	/*
+	 * Set interface hardware and broadcast addresses. For real ethernet
+	 * drivers you must get them from the hardware of course!
+	 */
+	hwtmp[0]=0x06;
+	hwtmp[1]=0x80;
+	hwtmp[2]=0x11;
+	hwtmp[3]=0x04;
+	hwtmp[4]=0x04;
+	hwtmp[5]=0x04;
+	hwbtmp[0]=0xff;
+	hwbtmp[1]=0xff;
+	hwbtmp[2]=0xff;
+	hwbtmp[3]=0xff;
+	hwbtmp[4]=0xff;
+	hwbtmp[5]=0xff;
+	memcpy (if_v4net.hwlocal.adr.bytes, hwtmp, ETH_ALEN);
+	//memcpy (if_v4net.hwbrcst.adr.bytes, hwbtmp, ETH_ALEN);
+	memcpy (if_v4net.hwbrcst.adr.bytes, "\377\377\377\377\377\377", ETH_ALEN);
+	
+	/*
+	 * Set length of send and receive queue. IF_MAXQ is a good value.
+	 */
+	if_v4net.rcv.maxqlen = IF_MAXQ;
+	if_v4net.snd.maxqlen = IF_MAXQ;
+	/*
+	 * Setup pointers to service functions
+	 */
+	if_v4net.open = v4net_open;
+	if_v4net.close = v4net_close;
+	if_v4net.output = v4net_output;
+	if_v4net.ioctl = v4net_ioctl;
+	/*
+	 * Optional timer function that is called every 200ms.
+	 */
+	if_v4net.timeout = 0;
+	
+	/*
+	 * Here you could attach some more data your driver may need
+	 */
+	if_v4net.data = 0;
+       
+ #if 1      
+       
+        mem4=(void*)TRAP_Mxalloc(2048+(MEMSIZE),1);
+if (!mem4)
+{
+ 
+  c_conws("kmalloc fail\n");
+  return(0);
+}
+c_conws ("1");
+
+c_conws ("2");
+
+
+	memset(mem4,0,2048+MEMSIZE);
+#endif
+
+c_conws ("3");
+alignmem=(uint32_t)mem4;
+
+//alignmem = ((alignmem+2047) & (ulong)0xfffff800);
+if (!alignmem)
+	return(0);
+memset((void*)alignmem,0,MEMSIZE);
+/*if(!(alignmem+MEMSIZE)%2048)
+{
+	c_conws("not aliged ");
+	return(0);
+}*/
+c_conws ("4");
+#if 0
+__asm__ __volatile__
+(
+
+
+	"movem.l a0-a6/d0-d7,-(sp)\n\t"
+        "move.l #0,0xde0028\n\t"
+
+        "move.l #0,0xde002c\n\t"
+	"lea .mactest,a1\n\t"
+	"move.w (a1),d0\n\t"
+	"move.l d0,0xde0020\n\t"
+	"move.l 2(a1),0xde0024\n\t"
+	"bra	.ert0\n\t"
+".mactest db	0x06,0x80,0x11,0x04,0x04,0x04\n\t"
+".ert0\n\t"
+	" movem.l (sp)+,a0-a6/d0-d7\n\t"
+); 
+	#endif
+ *multi1ptr=-1;
+
+ *multi2ptr=-1;
+
+//*mac1ptr=0;
+
+	//*dmastartptr=(uint32_t)alignmem ; /*mem;*/
+
+//*mac2ptr=0x11040404;
+//*mac1ptr=0x0680;
+	v4e->rx_start=alignmem;
+	v4e->rx_stop=alignmem+MEMSIZE;
+
+
+	//*dmaendptr=(uint32_t)MEMSIZE+alignmem; 
+c_conws ("5 ");
+*swposptr=((alignmem+MEMSIZE)-2048);
+swposcopy=((alignmem+MEMSIZE)-2048);
+#if 0
+(char*)mac1ptr[0]=0x04;
+(char*)mac1ptr[1]=0x04;
+(char*)mac2ptr[0]=0x04;
+(char*)mac2ptr[1]=0x11;
+(char*)mac2ptr[2]=0x80;
+(char*)mac2ptr[4]=0x06;
+#endif
+//	memcpy((char*)mac2ptr,stmac2,4);
+//	memcpy((char*)mac1ptr,stmac1,4);
+/*
+	06:80:11:04:04:04
+
+*/
+
+	*mac1ptr = (0x80L<<8|0x06);
+	*mac2ptr = (0x4L<<24|0x4L<<16|0x4L<<8|0x11);
+//uint8_t* hwd_mac = (uint8_t*)mac1ptr;
+#if 0
+v4e->dma=0;
+
+//hwd_mac[0] = hwd_mac[1] = 0;
+v4e->mac[0] = hwtmp[5];
+v4e->mac[1] = hwtmp[4];
+v4e->mac[2] = hwtmp[3];
+v4e->mac[3] = hwtmp[2];
+v4e->mac[4] = hwtmp[1];
+v4e->mac[5] = hwtmp[0];
+#endif
+//v4e->multicast1=0;
+//v4e->multicast2=0;
+
+c_conws (" done ");
+v4net_install_int();
+	/*
+	 * Number of packets the hardware can receive in fast succession,
+	 * 0 means unlimited.
+	 */
+	if_v4net.maxpackets = 0;
+	
+		ksprintf (message, "memory: 0x%x   ", alignmem);
+		c_conws (message);
+	/*
+	 * Register the interface.
+	 */
+	if_register (&if_v4net);
+	
+/*	
+	 * NETINFO->fname is a pointer to the drivers file name
+	 * (without leading path), eg. "v4net.xif".
+	 * NOTE: the file name will be overwritten when you leave the
+	 * init function. So if you need it later make a copy!
+	 */
+	if (NETINFO->fname)
+	{
+		strncpy (my_file_name, NETINFO->fname, sizeof (my_file_name));
+		my_file_name[sizeof (my_file_name) - 1] = '\0';
+# if 0
+		ksprintf (message, "My file name is '%s'\n\r", my_file_name);
+		c_conws (message);
+# endif
+	}	
+	/*
+	 * And say we are alive...
+	 */
+c_conws ("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!v4n  ");
+	ksprintf (message, "v4net Eth driver v0.0 (en%d)\n\r", if_v4net.unit);
+	c_conws (message);
+	return 0;
+}
