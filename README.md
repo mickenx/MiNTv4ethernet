@@ -7,5 +7,5 @@ to include the two files.
 But if you just want to try it , put the binary in your mint folder. c:\mint\$version\ .
 You will also need a inet4 module. If you have a dhcp server on your network, just run 
 dhclient en0. I am doing it at boot time.
-
+The assembler file is borrowed from the svethlana driver.
 Hapyy networking!
