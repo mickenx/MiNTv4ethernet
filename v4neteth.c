@@ -4,6 +4,7 @@
  *	12/14/94, Kay Roemer. 11/09/2021 Michael Grunditz
  */
 #include <malloc.h>
+#include <time.h>
 # include "global.h"
     
 # include "buf.h"
@@ -39,6 +40,10 @@ static struct netif if_v4net;
 static volatile uint32_t alignmem;
 static volatile uint32_t swposcopy;
 static void * mem4;
+static uint8_t hwtmp[6];
+static int framecount;
+//static struct timeval tval_before, tval_after, tval_result;
+
 
 
 typedef struct _v4_ethernet_t
@@ -84,9 +89,9 @@ v4net_open (struct netif *nif)
 
 
 volatile uint32_t *mac1ptr=(uint32_t*)0xde0020;
-//*intena2ptr=(short)*intenar2ptr;
+
 *mac1ptr = (1L<<31 |0x80<<8|0x06);
-//v4e->dma=(1L<<15);
+
 static	char message [100];
 ksprintf (message, "addr: 0x%lx\n\r", alignmem);
 c_conws(message);
@@ -96,7 +101,7 @@ __asm__ __volatile__
 	"move.w #0xa000,0xdff29a\n\t"
 );
 #endif
-
+framecount=0;
 	return 0;
 }
 
@@ -116,7 +121,7 @@ int i = 0;
 short type;
 volatile uint32_t * hw_write = (ulong*) 0xde003c;
 volatile uint32_t * sw_write = (ulong*) 0xde0038;
-
+uint32_t clktmp,clktmp2;
 
 uint32_t frametype;
 uint32_t lenlong=0;
@@ -126,9 +131,13 @@ uint32_t tmp=0;
 uint32_t tmp2=0;
 uint32_t tmp3=0;
 uint32_t	*dest;
+uint8_t * chkaddr;
 
+volatile uint32_t * c200hz = (uint32_t*)0x4ba;
 struct netif * nif=&if_v4net;
 BUF * b; 
+uint8_t testbyte=0xff;
+uint32_t elapsed=0;
 
 
 if (*hw_write > 0xfff00000)
@@ -150,6 +159,8 @@ tmp=swposcopy;
 tmp2=(uint32_t)2048+(swposcopy); //(swposcopy+2048);
 ksprintf (message, "swposcopy:1 0x%lx\n\r", *(uint32_t*)swposcopy);
 //c_conws(message);
+clktmp=*c200hz;
+
 if (tmp2>=(uint32_t)(alignmem+MEMSIZE)) {
 	ksprintf (message, "swposcopy wrap : 0x%x\n\r", swposcopy);
 //c_conws(message);
@@ -157,13 +168,23 @@ if (tmp2>=(uint32_t)(alignmem+MEMSIZE)) {
 	tmp2=alignmem;
 	}
 	swposcopy=tmp2;
-
-
+chkaddr=(uint8_t*)tmp2+8;
+#if 0
+// NEEDED FOR DHCP
+if ((uint8_t)chkaddr[5]!=hwtmp[5])
+	{
+			
+		//ksprintf (message, "hwcheck:idx %d dest 0x%x me 0x%x\n\r",i,(chkaddr[i]),hwtmp[i] );
+	//	c_conws(message);
+		//goto rxrestart;
+		if (tmp!=alignmem)
+			*sw_write=tmp; 
+			return;
+	}
+//	}
+#endif
 frame_len =(short) *((short*)tmp2+3) ;//(uint16_t)bytecopy[6];(char*)(swposcopy+6));
-ksprintf (message, "swposcopy: 0x%lx\n\r", tmp2);
-//c_conws(message);
-ksprintf (message, "len: %d\n\r", frame_len);
-//c_conws(message);
+
 *((short*)tmp2+3)=(short)0;
 frame_len = frame_len & 2047;
 
@@ -172,7 +193,7 @@ if (frame_len < 14 || frame_len > 1535)
 	nif->in_errors++;
 	c_conws("SIZE ERROR\r\n");
    goto rxrestart;
-//*int_enable|=(1UL<<13)|(1UL<<29);
+
 	
 	return;
 	
@@ -181,7 +202,7 @@ b = buf_alloc (frame_len +200, 100, BUF_ATOMIC);
 //c_conws("start recv\n\r");
 if (!b)
 {
-c_conws("BUF ERROR\r\n");
+//c_conws("BUF ERROR\r\n");
 	nif->in_errors++;
 __asm__ __volatile__
 (
@@ -193,13 +214,13 @@ __asm__ __volatile__
 b->dstart = (char*)(((uint32_t)(b->dstart)) & 0xFFFFFFFCUL);
 b->dend = (char*)(((uint32_t)(b->dend)) & 0xFFFFFFFCUL);
 dest = (uint32_t*)(b->dstart);
-//*(char*)swposcopy+=8;
 
-lenlong= (frame_len+ 3UL) >> 2;
-//for (i=0;i<(frame_len);i++)
+
+lenlong= ((frame_len+ 3UL)& 0xFFFC) >> 2;
+
 frametype = *( (short*)(tmp3+12) );
 
-#if 1
+#if 0
 			//Frames of a zero size or type are not useful.
 			//these also crash AROS.
 			if( frametype == 0 )
@@ -220,14 +241,37 @@ frametype = *( (short*)(tmp3+12) );
 			}
 #endif			
 tmp3=tmp2+8;
+uint32_t* asmsrc = (uint32_t*)tmp3;
 
-#if 1
-for(i=0;i<lenlong;i++){
 
+#if 0
+
+while(i<lenlong)
+{
 	
 	*(dest+i)=*((uint32_t*)tmp2+i+2);
-  
+	i++;
+	*(dest+i)=*((uint32_t*)tmp2+i+2);
+  	i++;
 }
+#endif
+//frame_len= ((frame_len+ 3UL)& 0xFFFC);
+#if 1
+__asm__ __volatile__
+		(
+	"move.l %2,%%d1\n\t"
+	"move.l %0,%%a0\n\t"
+	"move.l %1,%%a1\n\t"
+	"3:\n\t"
+	"move.l (%%a1)+,(%%a0)+\n\t"
+	"move.l (%%a1)+,(%%a0)+\n\t"
+	"subq.l	#2,%%d1\n\t"
+	"bgt.s	3b\n\t"
+	:  /*output*/
+	: "g" (dest), "g" (asmsrc), "g" (lenlong)
+	: "d0", "d1", "d2", "a0", "a1", "a2"
+			);
+			
 #endif
 //c_conws("after copy\r\n");
 b->dend += frame_len -4;
@@ -264,7 +308,31 @@ if (nif->bpf)
 	//				c_conws("input packet failed when receiving!\n\r");
 				}
 
+if ((uint32_t)*(hw_write)==(uint32_t)swposcopy+2048)
+{
 
+	if (tmp!=alignmem)
+*sw_write=tmp; 
+
+
+	return;
+}
+
+chkaddr=(uint8_t*)swposcopy+2048+8;
+
+
+if ((uint8_t)chkaddr[5]==hwtmp[5])
+{
+	
+	clktmp2=*c200hz;
+	
+		elapsed+=(uint32_t)clktmp2-clktmp;
+	
+	if (elapsed <40)
+	goto rxrestart;
+	else
+	elapsed=0;
+}
 if (tmp!=alignmem)
 *sw_write=tmp; 
 
@@ -403,7 +471,7 @@ v4net_output (struct netif *nif, BUF *buf, const char *hwaddr, short hwlen, shor
 	BUF *nbuf;
 	short type;
 	long r;
-	int tlen,rounded_len,stufflen;
+	uint32_t d0,tlen,rounded_len,stufflen;
 static	char message [100];
 	
 
@@ -413,30 +481,30 @@ static	char message [100];
 	ulong *txptr = (ulong*)txfifo;
 	ulong *txqtr = (ulong*)txq;
 	uint32_t i =0;
+	uint32_t r2;
+	stufflen=0;
+	rounded_len=0;
 	
-	//static	char message [100];
-	 //c_conws ("send start \n");
-	 ksprintf (message, "hw send : %lx\n\r", *hwaddr);
-	 //c_conws(message);
-	 ksprintf (message, "hw local : %lx\n\r", *nif->hwlocal.adr.bytes);
-//c_conws(message);
 	/*
 	 * This is not needed in real hardware drivers. We test
 	 * only if the destination hardware address is either our
 	 * hw or our broadcast address, because we loop the packets
 	 * back only then.
 	 */
+#if 1
 	if (memcmp (hwaddr, nif->hwlocal.adr.bytes, ETH_ALEN) &&
 	    memcmp (hwaddr, nif->hwbrcst.adr.bytes, ETH_ALEN))
 	{
-		//c_conws ("send out \n"); 
+	//	c_conws ("send out \n"); 
 		/*
 		 * Not for me.
 		 */
 /*		buf_deref (buf, BUF_NORMAL);
 		return 0;*/
 	}
+#endif
 	stufflen=0;
+
 	/*
 	 * Attach eth header. MintNet provides you with the eth_build_hdr
 	 * function that attaches an ethernet header to the packet in
@@ -456,12 +524,9 @@ static	char message [100];
 		nif->out_errors++;
 		return ENOMEM;
 	}
-	nif->out_packets++;
 	
-	if (nif->bpf)
-           bpf_input (nif, nbuf);
 
-
+nif->out_packets++;
 
 
 	/*
@@ -474,16 +539,48 @@ static	char message [100];
 	 * Before sending it pass it to the packet filter.
 	 */
 
-
+		if (nif->bpf) {
+           bpf_input (nif, nbuf);
+       //    c_conws("bpf\n\r");
+           }
         tlen = (nbuf->dend) - (nbuf->dstart);
-
-
-	ksprintf (message, "tx q : %lx\n\r", *txqtr);
-	// c_conws(message);
-        rounded_len = ((tlen + 3UL) & 0xFFFC);
+        rounded_len = (tlen + 3UL) & 0xFFFC ;
+        r2=rounded_len>>2;
+		#if 1
+d0=r2;
+	if(*txqtr)
+	{
+		volatile uint32_t d2 = 0;
+		volatile uint32_t d1 = ((0xfffffffdUL - d0)) + 512;
+		for(d2 = 800000UL; d2 > 0; d2--)
+		{
+		for (i=0;i<50;i++)
+		{
+			asm("nop;");
+			asm("nop;");
+			asm("nop;");
+			asm("nop;");
+			asm("nop;");
+		}
+			//ksprintf (message, "tx q : %lx\n\r", *txqtr);
+	        //c_conws(message);
+			if(*txqtr <= d1)
+				goto freebuffer;
+		}
+		//c_conws("tx full\n\r");
+		return -1;
+	}
+	else
+	{
+		goto freebuffer;
+	}
+#endif
+freebuffer:
+	
+        
         //If the packet is greater than 1536 we return error
-ksprintf (message, "tx len : %d\n\r",rounded_len);
-	 //c_conws(message);
+//ksprintf (message, "tx len : 0x%lx\n\r",tlen);
+//	 c_conws(message);
         if (rounded_len > 1536UL) 
 		return (1);
 	if (rounded_len<64) {
@@ -492,7 +589,7 @@ ksprintf (message, "tx len : %d\n\r",rounded_len);
 		}
 		//stufflen=0;
 	if (stufflen>0) {
-	ksprintf (message, "stuff len : %d\n\r",stufflen);
+	//ksprintf (message, "stuff len : %d\n\r",stufflen);
 	 //c_conws(message);
 
 	*txptr=64;
@@ -503,25 +600,76 @@ ksprintf (message, "tx len : %d\n\r",rounded_len);
 		stufflen=0UL;
 	*txptr=rounded_len;
 	}
-	rounded_len=rounded_len>>2;
-	for(i=0;i<rounded_len;i++)
-	{
-		*((uint32_t*)txptr)=*((u_int32_t*)nbuf->dstart+i);
-	}
 	
-	if (stufflen>0)
+	i=0;
+	uint32_t * dest = (uint32_t*)nbuf->dstart;
+#if 1
+if (rounded_len)
+{
+	for (i=0;i<(rounded_len>>2);i++)
 	{
+		*((uint32_t*)txptr)=*(dest+i);
+		
+		//*((uint32_t*)txptr)=*(dest++);
+		//i++;
+	}
+}
+#endif
+#if 0
+if (rounded_len)
+{
+	__asm__ __volatile__
+		(
+	"move.l %1,%%d1\n\t"
+	"move.l %0,%%a0\n\t"
+	"1:\n\t"
+	"move.l (%%a0)+,%%d2\n\t"
+	"move.l %%d2,0xde0040\n\t"
+	"subq.l	#4,%%d1\n\t"
+	"bgt.s	1b\n\t"
+	:  /*output*/
+	: "g" (dest), "g" (rounded_len)
+	: "d0", "d1", "d2", "a0", "a1", "a2"
+			);
+}	
+#endif
+
+#if 0
+	if (stufflen)
+{
+	__asm__ __volatile__
+		(
+	"move.l %0,%%d1\n\t"
+	"2:\n\t"
+	"move.l #0,0xde0040\n\t"
+	"subq.l	#4,%%d1\n\t"
+	"bgt.s	2b\n\t"
+	:  /*output*/
+	: "g" (stufflen)
+	: "d0", "d1", "d2", "a0", "a1", "a2"
+			);
+}
+#endif
+#if 1
+	if (stufflen)
+{
+	
 	//c_conws("stufflen!!\n\r");
-	stufflen=stufflen>>2;
-	for(i=0;i<stufflen;i++)
+	//stufflen>>2;
+	for(i=0;i<(stufflen>>2);i++)
 	{
 		__asm__ __volatile__
 		(
 	"move.l #0,0xde0040\n\t"
+	
 			);
 		//*((uint32_t*)txptr)=0;//(uint32_t)zerostuff;
 	}
 	}
+
+
+#endif
+	
 	//c_conws ("send return\n");
 	buf_deref (nbuf, BUF_NORMAL);
 	return (0);
@@ -696,7 +844,7 @@ long driver_init(void);
 long
 driver_init (void)
 {
-	unsigned char hwtmp[6];
+	//unsigned char hwtmp[6];
 	
 	static char message[100];
 	static char my_file_name[128];
@@ -823,11 +971,12 @@ memset((void*)alignmem,0,MEMSIZE);
 c_conws ("4");
 
 	
- *multi1ptr=-1;
 
- *multi2ptr=-1;
-
-
+	__asm__ __volatile__
+		(
+	"move.l #0,0xde0028\n\t"
+	"move.l #0,0xde002C\n\t"
+			);
 	v4e->rx_start=alignmem;
 	v4e->rx_stop=alignmem+MEMSIZE;
 
@@ -836,14 +985,7 @@ c_conws ("4");
 c_conws ("5 ");
 *swposptr=((alignmem+MEMSIZE)-2048);
 swposcopy=((alignmem+MEMSIZE)-2048);
-#if 0
-(char*)mac1ptr[0]=0x04;
-(char*)mac1ptr[1]=0x04;
-(char*)mac2ptr[0]=0x04;
-(char*)mac2ptr[1]=0x11;
-(char*)mac2ptr[2]=0x80;
-(char*)mac2ptr[4]=0x06;
-#endif
+
 
 
 	*mac1ptr = (0x80L<<8|0x06);
