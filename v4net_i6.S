@@ -1,7 +1,7 @@
 |
 | Low level and interrupt routines for the Svethlana driver
-|
-| 2010-12-17 Torbjîrn & Henrik GildÜ
+| ADopted for Vampire v4 Standalone 2021-12-02
+| 2010-12-17 Torbj‚Äùrn & Henrik Gild‚Ä†
 |
 |   
 
@@ -26,12 +26,10 @@ _interrupt_i6:
 	
 	
 	
-	
+	| Bug in fpga core.. should be bit 13
 	move.w 0xdff21e,d1
-       btst   #13,d1
-    | move.w  0xdff01e,d1
-     |   btst    #5,d1                  
-	beq	.testcont
+        btst   #3,d1
+        beq	.testcont
 	
 	move.w	#0x2000,0xdff29a
 	
