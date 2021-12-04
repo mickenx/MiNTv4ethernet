@@ -1,4 +1,4 @@
-/*     
+/*
  *	v4net , ethernet driver for Vampire V4
  *  Based on FreeMiNT dummy ethernet driver
  *	12/14/94, Kay Roemer. 11/09/2021 Michael Grunditz
@@ -6,7 +6,7 @@
 #include <malloc.h>
 #include <time.h>
 # include "global.h"
-    
+
 # include "buf.h"
 # include "inet4/if.h"
 # include "inet4/ifeth.h"
@@ -35,7 +35,7 @@ typedef u_int32_t               uint32_t;
 /*
  * Our interface structure
  */
-static struct netif if_v4net; 
+static struct netif if_v4net;
 
 static volatile uint32_t alignmem;
 static volatile uint32_t swposcopy;
@@ -117,13 +117,12 @@ v4net_install_int (void)
 
 void _cdecl v4net_recv(void)
 {
-int i = 0;
+
 short type;
 volatile uint32_t * hw_write = (ulong*) 0xde003c;
 volatile uint32_t * sw_write = (ulong*) 0xde0038;
 uint32_t clktmp,clktmp2;
 
-uint32_t frametype;
 uint32_t lenlong=0;
 static	char message [100];
 short frame_len = 0;
@@ -135,8 +134,8 @@ uint8_t * chkaddr;
 
 volatile uint32_t * c200hz = (uint32_t*)0x4ba;
 struct netif * nif=&if_v4net;
-BUF * b; 
-uint8_t testbyte=0xff;
+BUF * b;
+
 uint32_t elapsed=0;
 
 
@@ -164,7 +163,7 @@ clktmp=*c200hz;
 if (tmp2>=(uint32_t)(alignmem+MEMSIZE)) {
 	ksprintf (message, "swposcopy wrap : 0x%x\n\r", swposcopy);
 //c_conws(message);
-	
+
 	tmp2=alignmem;
 	}
 	swposcopy=tmp2;
@@ -173,12 +172,12 @@ chkaddr=(uint8_t*)tmp2+8;
 // NEEDED FOR DHCP
 if ((uint8_t)chkaddr[5]!=hwtmp[5])
 	{
-			
+
 		//ksprintf (message, "hwcheck:idx %d dest 0x%x me 0x%x\n\r",i,(chkaddr[i]),hwtmp[i] );
 	//	c_conws(message);
 		//goto rxrestart;
 		if (tmp!=alignmem)
-			*sw_write=tmp; 
+			*sw_write=tmp;
 			return;
 	}
 //	}
@@ -194,9 +193,9 @@ if (frame_len < 14 || frame_len > 1535)
 	c_conws("SIZE ERROR\r\n");
    goto rxrestart;
 
-	
+
 	return;
-	
+
 }
 b = buf_alloc (frame_len +200, 100, BUF_ATOMIC);
 //c_conws("start recv\n\r");
@@ -218,7 +217,7 @@ dest = (uint32_t*)(b->dstart);
 
 lenlong= ((frame_len+ 3UL)& 0xFFFC) >> 2;
 
-frametype = *( (short*)(tmp3+12) );
+
 
 #if 0
 			//Frames of a zero size or type are not useful.
@@ -239,7 +238,7 @@ frametype = *( (short*)(tmp3+12) );
 				return;
 
 			}
-#endif			
+#endif
 tmp3=tmp2+8;
 uint32_t* asmsrc = (uint32_t*)tmp3;
 
@@ -248,7 +247,7 @@ uint32_t* asmsrc = (uint32_t*)tmp3;
 
 while(i<lenlong)
 {
-	
+
 	*(dest+i)=*((uint32_t*)tmp2+i+2);
 	i++;
 	*(dest+i)=*((uint32_t*)tmp2+i+2);
@@ -271,14 +270,14 @@ __asm__ __volatile__
 	: "g" (dest), "g" (asmsrc), "g" (lenlong)
 	: "d0", "d1", "d2", "a0", "a1", "a2"
 			);
-			
+
 #endif
 //c_conws("after copy\r\n");
 b->dend += frame_len -4;
                         //TODO: should we subtract 4 here, to skip the CRC?
 
-                                //(uint32)(frame_len - 4UL); 
-				
+                                //(uint32)(frame_len - 4UL);
+
                 //TODO: should we subtract 4 here, to skip the CRC?
 
                                 if((b->dend) < (b->dstart))
@@ -312,7 +311,7 @@ if ((uint32_t)*(hw_write)==(uint32_t)swposcopy+2048)
 {
 
 	if (tmp!=alignmem)
-*sw_write=tmp; 
+*sw_write=tmp;
 
 
 	return;
@@ -323,18 +322,18 @@ chkaddr=(uint8_t*)swposcopy+2048+8;
 
 if ((uint8_t)chkaddr[5]==hwtmp[5])
 {
-	
+
 	clktmp2=*c200hz;
-	
+
 		elapsed+=(uint32_t)clktmp2-clktmp;
-	
+
 	if (elapsed <40)
 	goto rxrestart;
 	else
 	elapsed=0;
 }
 if (tmp!=alignmem)
-*sw_write=tmp; 
+*sw_write=tmp;
 
 
 }
@@ -345,9 +344,9 @@ if (tmp!=alignmem)
 static long
 v4net_close (struct netif *nif)
 {
-	
+
 	v4e->dma=0;
-	
+
 	return 0;
 }
 
@@ -464,7 +463,7 @@ v4net_close (struct netif *nif)
  *	eth_remove_hdr ();
  *	addroottimeout (..., ..., 1);
  */
- 
+
 static long
 v4net_output (struct netif *nif, BUF *buf, const char *hwaddr, short hwlen, short pktype)
 {
@@ -472,10 +471,10 @@ v4net_output (struct netif *nif, BUF *buf, const char *hwaddr, short hwlen, shor
 	short type;
 	long r;
 	uint32_t d0,tlen,rounded_len,stufflen;
-static	char message [100];
-	
+//static	char message [100];
 
-        
+
+
  	ulong txfifo = 0xde0040;
  	ulong txq = 0xde0044;
 	ulong *txptr = (ulong*)txfifo;
@@ -484,7 +483,7 @@ static	char message [100];
 	uint32_t r2;
 	stufflen=0;
 	rounded_len=0;
-	
+
 	/*
 	 * This is not needed in real hardware drivers. We test
 	 * only if the destination hardware address is either our
@@ -495,7 +494,7 @@ static	char message [100];
 	if (memcmp (hwaddr, nif->hwlocal.adr.bytes, ETH_ALEN) &&
 	    memcmp (hwaddr, nif->hwbrcst.adr.bytes, ETH_ALEN))
 	{
-	//	c_conws ("send out \n"); 
+	//	c_conws ("send out \n");
 		/*
 		 * Not for me.
 		 */
@@ -520,11 +519,11 @@ static	char message [100];
 	nbuf = eth_build_hdr (buf, nif, hwaddr, pktype);
 	if (nbuf == 0)
 	{
-		c_conws ("send nonbuf \n"); 
+		c_conws ("send nonbuf \n");
 		nif->out_errors++;
 		return ENOMEM;
 	}
-	
+
 
 nif->out_packets++;
 
@@ -576,12 +575,12 @@ d0=r2;
 	}
 #endif
 freebuffer:
-	
-        
+
+
         //If the packet is greater than 1536 we return error
 //ksprintf (message, "tx len : 0x%lx\n\r",tlen);
 //	 c_conws(message);
-        if (rounded_len > 1536UL) 
+        if (rounded_len > 1536UL)
 		return (1);
 	if (rounded_len<64) {
 		//c_conws("rounded len err\n\r");
@@ -600,7 +599,7 @@ freebuffer:
 		stufflen=0UL;
 	*txptr=rounded_len;
 	}
-	
+
 	i=0;
 	uint32_t * dest = (uint32_t*)nbuf->dstart;
 #if 1
@@ -609,7 +608,7 @@ if (rounded_len)
 	for (i=0;i<(rounded_len>>2);i++)
 	{
 		*((uint32_t*)txptr)=*(dest+i);
-		
+
 		//*((uint32_t*)txptr)=*(dest++);
 		//i++;
 	}
@@ -631,7 +630,7 @@ if (rounded_len)
 	: "g" (dest), "g" (rounded_len)
 	: "d0", "d1", "d2", "a0", "a1", "a2"
 			);
-}	
+}
 #endif
 
 #if 0
@@ -653,7 +652,7 @@ if (rounded_len)
 #if 1
 	if (stufflen)
 {
-	
+
 	//c_conws("stufflen!!\n\r");
 	//stufflen>>2;
 	for(i=0;i<(stufflen>>2);i++)
@@ -661,7 +660,7 @@ if (rounded_len)
 		__asm__ __volatile__
 		(
 	"move.l #0,0xde0040\n\t"
-	
+
 			);
 		//*((uint32_t*)txptr)=0;//(uint32_t)zerostuff;
 	}
@@ -669,7 +668,7 @@ if (rounded_len)
 
 
 #endif
-	
+
 	//c_conws ("send return\n");
 	buf_deref (nbuf, BUF_NORMAL);
 	return (0);
@@ -678,7 +677,7 @@ if (rounded_len)
 	 * only part of the output function, because this example
 	 * is a loopback driver.
 	 */
-	
+
 	/*
 	 * Before passing it to if_input pass it to the packet filter.
 	 * (but before stripping the ethernet header).
@@ -689,7 +688,7 @@ if (rounded_len)
 	 * if (nif->bpf)
 	 *	bpf_input (nif, buf);
 	 */
-	
+
 	/*
 	 * Strip eth header and get packet type. MintNet provides you
 	 * with the function eth_remove_hdr(buf) for this purpose where
@@ -697,7 +696,7 @@ if (rounded_len)
 	 * ethernet header and returns the packet type.
 	 */
 	type = eth_remove_hdr (nbuf);
-	
+
 	/*
 	 * Then you should pass the buf to MintNet for further processing,
 	 * using
@@ -715,7 +714,7 @@ if (rounded_len)
 		nif->in_errors++;
 	else
 		nif->in_packets++;
-	
+
 	return r;
 }
 
@@ -732,14 +731,14 @@ static long
 v4net_ioctl (struct netif *nif, short cmd, long arg)
 {
 	struct ifreq *ifr;
-	
+
 	switch (cmd)
 	{
 		case SIOCSIFNETMASK:
 		case SIOCSIFFLAGS:
 		case SIOCSIFADDR:
 			return 0;
-		
+
 		case SIOCSIFMTU:
 			/*
 			 * Limit MTU to 1500 bytes. MintNet has alraedy set nif->mtu
@@ -748,7 +747,7 @@ v4net_ioctl (struct netif *nif, short cmd, long arg)
 			if (nif->mtu > ETH_MAX_DLEN)
 				nif->mtu = ETH_MAX_DLEN;
 			return 0;
-		
+
 		case SIOCSIFOPT:
 			/*
 			 * Interface configuration, handled by v4net_config()
@@ -756,7 +755,7 @@ v4net_ioctl (struct netif *nif, short cmd, long arg)
 			ifr = (struct ifreq *) arg;
 			return v4net_config (nif, ifr->ifru.data);
 	}
-	
+
 	return ENOSYS;
 }
 
@@ -778,7 +777,7 @@ static long
 v4net_config (struct netif *nif, struct ifopt *ifo)
 {
 # define STRNCMP(s)	(strncmp ((s), ifo->option, sizeof (ifo->option)))
-	
+
 	if (!STRNCMP ("hwaddr"))
 	{
 		uchar *cp;
@@ -825,7 +824,7 @@ v4net_config (struct netif *nif, struct ifopt *ifo)
 			return ENOENT;
 		DEBUG (("v4net: log file is %s", ifo->ifou.v_string));
 	}
-	
+
 	return ENOSYS;
 }
 
@@ -845,7 +844,7 @@ long
 driver_init (void)
 {
 	//unsigned char hwtmp[6];
-	
+
 	static char message[100];
 	static char my_file_name[128];
 
@@ -854,9 +853,9 @@ volatile uint32_t *mac1ptr = (uint32_t*)0xde0020;
 
 volatile uint32_t* mac2ptr =(uint32_t*) 0xde0024;
 
-volatile ulong * multi1ptr = (ulong *)0xde0028;
+//volatile ulong * multi1ptr = (ulong *)0xde0028;
 
-volatile ulong * multi2ptr = (ulong*)0xde002c;
+//volatile ulong * multi2ptr = (ulong*)0xde002c;
 
 volatile ulong * swposptr = (ulong *)0xde0038;
 
@@ -867,7 +866,7 @@ volatile ulong * swposptr = (ulong *)0xde0038;
 
 
 
-	
+
 	/*
 	 * Set interface name
 	 */
@@ -895,7 +894,7 @@ volatile ulong * swposptr = (ulong *)0xde0038;
 	 * Time in ms between calls to (*if_v4net.timeout) ();
 	 */
 	if_v4net.timer = 0;
-	
+
 	/*
 	 * Interface hardware type
 	 */
@@ -905,7 +904,7 @@ volatile ulong * swposptr = (ulong *)0xde0038;
 	 */
 	if_v4net.hwlocal.len =
 	if_v4net.hwbrcst.len = ETH_ALEN;
-	
+
 	/*
 	 * Set interface hardware and broadcast addresses. For real ethernet
 	 * drivers you must get them from the hardware of course!
@@ -916,11 +915,11 @@ volatile ulong * swposptr = (ulong *)0xde0038;
 	hwtmp[3]=0x04;
 	hwtmp[4]=0x04;
 	hwtmp[5]=0x04;
-	
+
 	memcpy (if_v4net.hwlocal.adr.bytes, hwtmp, ETH_ALEN);
 	//memcpy (if_v4net.hwbrcst.adr.bytes, hwbtmp, ETH_ALEN);
 	memcpy (if_v4net.hwbrcst.adr.bytes, "\377\377\377\377\377\377", ETH_ALEN);
-	
+
 	/*
 	 * Set length of send and receive queue. IF_MAXQ is a good value.
 	 */
@@ -937,18 +936,18 @@ volatile ulong * swposptr = (ulong *)0xde0038;
 	 * Optional timer function that is called every 200ms.
 	 */
 	if_v4net.timeout = 0;
-	
+
 	/*
 	 * Here you could attach some more data your driver may need
 	 */
 	if_v4net.data = 0;
-       
- #if 1      
-       
+
+ #if 1
+
         mem4=(void*)TRAP_Mxalloc(2048+(MEMSIZE),1);
 if (!mem4)
 {
- 
+
   c_conws("kmalloc fail\n");
   return(0);
 }
@@ -970,7 +969,7 @@ memset((void*)alignmem,0,MEMSIZE);
 
 c_conws ("4");
 
-	
+
 
 	__asm__ __volatile__
 		(
@@ -981,7 +980,7 @@ c_conws ("4");
 	v4e->rx_stop=alignmem+MEMSIZE;
 
 
-	 
+
 c_conws ("5 ");
 *swposptr=((alignmem+MEMSIZE)-2048);
 swposcopy=((alignmem+MEMSIZE)-2048);
@@ -999,15 +998,15 @@ v4net_install_int();
 	 * 0 means unlimited.
 	 */
 	if_v4net.maxpackets = 0;
-	
+
 		ksprintf (message, "memory: 0x%x   ", alignmem);
 		c_conws (message);
 	/*
 	 * Register the interface.
 	 */
 	if_register (&if_v4net);
-	
-/*	
+
+/*
 	 * NETINFO->fname is a pointer to the drivers file name
 	 * (without leading path), eg. "v4net.xif".
 	 * NOTE: the file name will be overwritten when you leave the
@@ -1021,7 +1020,7 @@ v4net_install_int();
 		ksprintf (message, "My file name is '%s'\n\r", my_file_name);
 		c_conws (message);
 # endif
-	}	
+	}
 	/*
 	 * And say we are alive...
 	 */
